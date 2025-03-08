@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LiveKit Agent Demo</title>
+    <script src="https://unpkg.com/livekit-client@1.15.5/dist/livekit-client.js"></script>
+</head>
+<body>
+    <h1>LiveKit Agent Demo</h1>
+    <button id="connect">Connect</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <div id="status"></div>
+    <pre id="debug"></pre>
+
+    <script>
+        function updateStatus(msg) {
+            document.getElementById('status').textContent = msg;
+            document.getElementById('debug').textContent += '\n' + new Date().toISOString() + ': ' + msg;
+            console.log(msg);
+        }
+
+        // Wait for LiveKit to load
+        window.onload = function() {
+            if (typeof LivekitClient === 'undefined') {
+                updateStatus('Error: LiveKit client failed to load');
+                return;
+            }
+
+            const room = new LivekitClient.Room();
+            
+            room.on('participantConnected', (participant) => {
+                updateStatus('Participant connected: ' + participant.identity);
+            });
+
+            room.on('participantDisconnected', (participant) => {
+                updateStatus('Participant disconnected: ' + participant.identity);
+            });
+
+            async function connectToRoom() {
+                try {
+                    updateStatus('Connecting to room...');
+                    const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDEyMTcxMTcsImlzcyI6ImRldmtleSIsIm5hbWUiOiJ3ZWItdXNlciIsIm5iZiI6MTc0MTIxNjgxNywic3ViIjoid2ViLXVzZXIiLCJ2aWRlbyI6eyJyb29tIjoidGVzdC1yb29tIiwicm9vbUpvaW4iOnRydWV9fQ.ziEQkQD9v606FoK8h00OxJvgQ3fK2zQ_qy1qEyzHNL4';
+                    await room.connect('ws://localhost:7880', token);
+                    updateStatus('Connected to room');
+                    
+                    updateStatus('Enabling microphone...');
+                    const localTrack = await LivekitClient.createLocalAudioTrack();
+                    await room.localParticipant.publishTrack(localTrack);
+                    updateStatus('Microphone enabled');
+                    
+                    document.getElementById('connect').disabled = true;
+                    document.getElementById('disconnect').disabled = false;
+
+                    // List current participants
+                    room.participants.forEach((participant) => {
+                        updateStatus('Participant in room: ' + participant.identity);
+                    });
+                } catch (error) {
+                    console.error('Connection failed:', error);
+                    updateStatus('Connection failed: ' + error.message);
+                }
+            }
+
+            document.getElementById('connect').onclick = connectToRoom;
+            document.getElementById('disconnect').onclick = () => {
+                room.disconnect();
+                updateStatus('Disconnected');
+                document.getElementById('connect').disabled = false;
+                document.getElementById('disconnect').disabled = true;
+            };
+        };
+    </script>
+</body>
+</html>
