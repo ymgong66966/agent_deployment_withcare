@@ -3,7 +3,6 @@ numpy
 python-dotenv
 tqdm
 livekit
-annoy 
 livekit-agents
 livekit-plugins-openai
 livekit-plugins-deepgram
