@@ -15,7 +15,7 @@ services:
   # created in the Render dashboard.
   # envVars:
   # - fromGroup: agent-deployment-env 
-  # region: virginia
+  region: ohio
 
   # 300s is the standard allowed maximum. Talk to render.com support if you need this increased.
   maxShutdownDelaySeconds: 300
