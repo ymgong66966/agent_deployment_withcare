@@ -13,9 +13,9 @@ services:
 
   # Environment variables are stored in a group
   # created in the Render dashboard.
-  envVars:
-  - fromGroup: agent-deployment-env 
-  region: virginia
+  # envVars:
+  # - fromGroup: agent-deployment-env 
+  # region: virginia
 
   # 300s is the standard allowed maximum. Talk to render.com support if you need this increased.
   maxShutdownDelaySeconds: 300
@@ -27,3 +27,16 @@ services:
     targetCPUPercent: 60
     targetMemoryPercent: 60
 version: "1"
+envVarGroups:
+  - name: agent-deployment-test
+    envVars:
+      - key: OPENAI_API_KEY
+        value: sk-proj-ITdZ2fPvXLrs0x0wlyknT3BlbkFJ9ytKoQicG8OVs2CAEipQ
+      - key: LIVEKIT_API_KEY
+        value: API9KnxmkVSe4SQ
+      - key: LIVEKIT_API_SECRET
+        value: eKYHEdPtIIYQvZez0rfXKfrbQaS6e39eWNQMPOV9AflV
+      - key: DEEPGRAM_API_KEY
+        value: 52715bdfd214e891c734c8eca081f456768990ab
+      - key: LIVEKIT_URL
+        value: wss://mockcall-5zop4lmn.livekit.cloud
