@@ -1,11 +1,11 @@
 services:
 - type: pserv
-  repo: https://github.com/livekit-examples/agent-deployment
+  repo: https://github.com/ymgong66966/agent_deployment_withcare.git
 
   # Change this to the path containing your Dockerfile
-  rootDir: python-agent-example-app
+  rootDir: ./python-agent-example-app/Dockerfile
 
-  name: agent-deployment
+  name: agent-deployment-test
   runtime: docker
 
   # Free plan is not available for private services
