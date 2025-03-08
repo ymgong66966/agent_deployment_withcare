@@ -3,7 +3,7 @@ services:
   repo: https://github.com/ymgong66966/agent_deployment_withcare.git
 
   # Change this to the path containing your Dockerfile
-  rootDir: ./python-agent-example-app/
+
 
   name: agent-deployment-test
   runtime: docker
