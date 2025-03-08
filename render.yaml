@@ -6,7 +6,7 @@ services:
   rootDir: python-agent-example-app
 
   name: agent-deployment
-  runtime: image
+  runtime: docker
 
   # Free plan is not available for private services
   plan: starter
