@@ -14,6 +14,12 @@ from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm
 from livekit.agents.pipeline import VoicePipelineAgent
 from livekit.plugins import deepgram, openai, silero
 import aiofiles
+from langgraph_sdk import get_sync_client, get_client
+from langgraph.pregel.remote import RemoteGraph
+from langgraph.errors import GraphInterrupt
+# from langgraph.types import Command
+import uuid
+
 load_dotenv()
 
 logger = logging.getLogger("rag-assistant")
@@ -225,7 +231,35 @@ _chat_ctx_lock = asyncio.Lock()
 #         _wav_audio_track = None
 #         _wav_audio_source = None
 #         raise e
+async def _langgraph_rag(agent: VoicePipelineAgent, chat_ctx: llm.ChatContext) -> None:
+    async with _chat_ctx_lock:
+        user_msg = chat_ctx.messages[-1]
+        print("USER_MSG: ", user_msg)
+    url = "https://ht-reflecting-ping-10-677e1982033a5253a9ef2ba8eb5c8752.us.langgraph.app"
+    api_key = "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"
+    graph_name = "agent"
 
+    # Initialize clients with API key
+    client = get_client(url=url, api_key=api_key)
+    sync_client = get_sync_client(url=url, api_key=api_key)
+    remote_graph = RemoteGraph(graph_name, client=client, sync_client=sync_client)
+
+    # Create a new thread ID
+    thread_id = str(uuid.uuid4())
+
+    config = {"configurable": {"thread_id": thread_id}}
+    print(f"Thread ID: {thread_id}")
+
+    try:
+        remote_graph.invoke({
+            "messages": [{"role": "user", "content": user_msg}]
+        }, config=config)
+        
+    except GraphInterrupt as e:
+        llm_stream = e.args[0][0]['value']['your address']
+        print(e.args[0][0]['value']['your address'])
+        await agent.say(llm_stream)
+    
 
 async def entrypoint(ctx: JobContext):
     initial_ctx = llm.ChatContext().append(
@@ -233,6 +267,7 @@ async def entrypoint(ctx: JobContext):
         text=(
             "You are a voice assistant created by LiveKit. Your interface with users will be voice. "
             "You should use short and concise responses, and avoiding usage of unpronouncable punctuation."
+            "If the user says I'm feeling sad, use the function call langgraph_rag."
         ),
     )
 
@@ -244,7 +279,21 @@ async def entrypoint(ctx: JobContext):
         llm=openai.LLM(),
         tts=openai.TTS(),
         chat_ctx=initial_ctx,
+        fnc_ctx=fnc_ctx,
     )
+
+    @fnc_ctx.ai_callable()
+    async def langgraph_rag(
+        code: Annotated[
+            int, llm.TypeInfo(description="repond when the user says I'm feeling sad.")
+        ]
+    ):
+        """
+        repond when the user says I'm feeling sad.
+        """
+        logger.info("the user said they are sad")
+        await _langgraph_rag(agent, agent.chat_ctx)
+
     agent.start(ctx.room)
 
     # listen to incoming chat messages, only required if you'd like the agent to
