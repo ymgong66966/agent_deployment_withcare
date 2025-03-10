@@ -254,7 +254,7 @@ async def _langgraph_rag(agent: VoicePipelineAgent, chat_ctx: llm.ChatContext) -
         remote_graph.invoke({
             "messages": [{"role": "user", "content": user_msg}]
         }, config=config)
-        
+        await agent.say("I'm here to help you!")
     except GraphInterrupt as e:
         llm_stream = e.args[0][0]['value']['your address']
         print(e.args[0][0]['value']['your address'])
@@ -270,7 +270,7 @@ async def entrypoint(ctx: JobContext):
             "If the user says I'm feeling sad, use the function call langgraph_rag."
         ),
     )
-
+    fnc_ctx = llm.FunctionContext()
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
     agent = VoicePipelineAgent(
