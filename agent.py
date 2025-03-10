@@ -1,20 +1,18 @@
 import logging
 import pickle
 import asyncio
-import random
-import wave
+
 import numpy as np
 from typing import Annotated
 from pathlib import Path
 from livekit import rtc
 from datetime import datetime
 import os
-from snowflake import connector
 
 from dotenv import load_dotenv
 from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm
 from livekit.agents.pipeline import VoicePipelineAgent
-from livekit.plugins import deepgram, openai, rag, silero
+from livekit.plugins import deepgram, openai, silero
 import aiofiles
 load_dotenv()
 
