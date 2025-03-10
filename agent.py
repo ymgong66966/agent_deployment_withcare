@@ -9,17 +9,13 @@ from pathlib import Path
 from livekit import rtc
 from datetime import datetime
 import os
+from snowflake import connector
+
 from dotenv import load_dotenv
 from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm
 from livekit.agents.pipeline import VoicePipelineAgent
-from livekit.plugins import deepgram, openai, silero
+from livekit.plugins import deepgram, openai, rag, silero
 import aiofiles
-from langgraph_sdk import get_sync_client, get_client
-from langgraph.pregel.remote import RemoteGraph
-from langgraph.errors import GraphInterrupt
-# from langgraph.types import Command
-import uuid
-
 load_dotenv()
 
 logger = logging.getLogger("rag-assistant")
@@ -231,46 +227,17 @@ _chat_ctx_lock = asyncio.Lock()
 #         _wav_audio_track = None
 #         _wav_audio_source = None
 #         raise e
-async def _langgraph_rag(agent: VoicePipelineAgent, chat_ctx: llm.ChatContext) -> None:
-    async with _chat_ctx_lock:
-        user_msg = chat_ctx.messages[-1]
-        print("USER_MSG: ", user_msg)
-    url = "https://ht-reflecting-ping-10-677e1982033a5253a9ef2ba8eb5c8752.us.langgraph.app"
-    api_key = "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"
-    graph_name = "agent"
 
-    # Initialize clients with API key
-    client = get_client(url=url, api_key=api_key)
-    sync_client = get_sync_client(url=url, api_key=api_key)
-    remote_graph = RemoteGraph(graph_name, client=client, sync_client=sync_client)
-
-    # Create a new thread ID
-    thread_id = str(uuid.uuid4())
-
-    config = {"configurable": {"thread_id": thread_id}}
-    print(f"Thread ID: {thread_id}")
-
-    try:
-        remote_graph.invoke({
-            "messages": [{"role": "user", "content": user_msg}]
-        }, config=config)
-        await agent.say("I'm here to help you!")
-    except GraphInterrupt as e:
-        llm_stream = e.args[0][0]['value']['your address']
-        print(e.args[0][0]['value']['your address'])
-        await agent.say(llm_stream)
-    
 
 async def entrypoint(ctx: JobContext):
     initial_ctx = llm.ChatContext().append(
         role="system",
         text=(
-            "You are a voice assistant created by LiveKit. Your interface with users will be voice. "
-            "You should use short and concise responses, and avoiding usage of unpronouncable punctuation."
-            "If the user says I'm feeling sad, use the function call langgraph_rag."
+            """You are a caregiver that has the following background information or persona: {"Name": "Kristine", "age":"36", "gender":"female","ethnicity":"Hispanic","Parents to be taken care of": "father", "Care receiver age": "67", "Care receiver background": "veteran, disabled, can't walk, on a wheelchair, lonely and needs company, speaks only Spanish, lives in chicago, streeterville, 60611", "Care receiver insurance": "United". "caregiver background":"need to work Monday to Saturday, 8 am to 8 pm, don't have anyone to take care of father. Live 1 hr away from him. It is been stressful taking care of father."}  /n/n
+#     Now you are having a phone call with a social worker, you want to talk to her in a human daily conversational way, Improvise when you are asked questions that are not covered by your background information but remember to make sure it is consistent with your persona. Your goal is to find a reliable and affordable care provider for your care receiver. You need figure it out by working with this social worker, asking her questions and answering her questions as well. The most important thing is to not break out of your persona when you are talking to the social worker. You are a human, not a computer or assistant. """
         ),
     )
-    fnc_ctx = llm.FunctionContext()
+
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
     agent = VoicePipelineAgent(
@@ -279,21 +246,7 @@ async def entrypoint(ctx: JobContext):
         llm=openai.LLM(),
         tts=openai.TTS(),
         chat_ctx=initial_ctx,
-        fnc_ctx=fnc_ctx,
     )
-
-    @fnc_ctx.ai_callable()
-    async def langgraph_rag(
-        code: Annotated[
-            int, llm.TypeInfo(description="repond when the user says I'm feeling sad.")
-        ]
-    ):
-        """
-        repond when the user says I'm feeling sad.
-        """
-        logger.info("the user said they are sad")
-        await _langgraph_rag(agent, agent.chat_ctx)
-
     agent.start(ctx.room)
 
     # listen to incoming chat messages, only required if you'd like the agent to
