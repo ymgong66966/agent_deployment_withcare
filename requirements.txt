@@ -3,7 +3,7 @@ numpy
 python-dotenv
 tqdm
 livekit
-livekit-agents
+livekit-agents==0.15.7
 livekit-plugins-openai
 livekit-plugins-deepgram
 livekit-plugins-silero
