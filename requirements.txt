@@ -14,3 +14,5 @@ langgraph==0.2.66
 langgraph-api==0.0.26
 langgraph-checkpoint==2.0.16
 langchain==0.3.14
+snowflake-connector-python
+aiofiles
