@@ -11,8 +11,16 @@ import os
 import snowflake.connector
 
 from dotenv import load_dotenv
-from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm
-from livekit.agents.pipeline import VoicePipelineAgent
+from livekit.agents import (
+    AgentSession,
+    Agent,
+    JobContext,
+    WorkerOptions,
+    cli,
+    llm,
+    RoomInputOptions,
+    AutoSubscribe
+)
 from livekit.plugins import deepgram, openai, silero
 import aiofiles
 load_dotenv()
@@ -67,6 +75,14 @@ async def get_caregiver_profile():
         return ""
 
 
+class CaregiverAgent(Agent):
+    """Custom agent class for caregiver persona"""
+    def __init__(self, profile_text: str):
+        instructions = f"""You are a caregiver that has the following background information or persona: {profile_text}  /n/n
+#     Now you are having a phone call with a social worker, you want to talk to her in a human daily conversational way, Improvise when you are asked questions that are not covered by your background information but remember to make sure it is consistent with your persona. Your goal is to find a reliable and affordable care provider for your care receiver. You need figure it out by working with this social worker, asking her questions and answering her questions as well. The most important thing is to not break out of your persona when you are talking to the social worker. You are a human, not a computer or assistant."""
+        super().__init__(instructions=instructions)
+
+
 async def entrypoint(ctx: JobContext):
     # Fetch caregiver profile from Snowflake
     caregiver_profile = await get_caregiver_profile()
@@ -74,34 +90,32 @@ async def entrypoint(ctx: JobContext):
     # Use the profile if available, otherwise use the default profile
     profile_text = caregiver_profile if caregiver_profile else """{"Name": "Kristine", "age":"36", "gender":"female","ethnicity":"Hispanic","Parents to be taken care of": "father", "Care receiver age": "67", "Care receiver background": "veteran, disabled, can't walk, on a wheelchair, lonely and needs company, speaks only Spanish, lives in chicago, streeterville, 60611", "Care receiver insurance": "United". "caregiver background":"need to work Monday to Saturday, 8 am to 8 pm, don't have anyone to take care of father. Live 1 hr away from him. It is been stressful taking care of father."}"""
     
-    initial_ctx = llm.ChatContext().append(
-        role="system",
-        text=(
-            f"""You are a caregiver that has the following background information or persona: {profile_text}  /n/n
-#     Now you are having a phone call with a social worker, you want to talk to her in a human daily conversational way, Improvise when you are asked questions that are not covered by your background information but remember to make sure it is consistent with your persona. Your goal is to find a reliable and affordable care provider for your care receiver. You need figure it out by working with this social worker, asking her questions and answering her questions as well. The most important thing is to not break out of your persona when you are talking to the social worker. You are a human, not a computer or assistant. """
-        ),
-    )
-
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
-    agent = VoicePipelineAgent(
+    # Create an agent session with the necessary components
+    session = AgentSession(
         vad=silero.VAD.load(),
         stt=deepgram.STT(),
         llm=openai.LLM(),
         tts=openai.TTS(),
-        chat_ctx=initial_ctx,
     )
-    agent.start(ctx.room)
+    
+    # Create the agent with the caregiver profile
+    agent = CaregiverAgent(profile_text)
+    
+    # Start the session with the agent
+    await session.start(
+        room=ctx.room,
+        agent=agent,
+        room_input_options=RoomInputOptions(),
+    )
 
-    # listen to incoming chat messages, only required if you'd like the agent to
-    # answer incoming messages from Chat
+    # listen to incoming chat messages
     chat = rtc.ChatManager(ctx.room)
 
     async def answer_from_text(txt: str):
-        chat_ctx = agent.chat_ctx.copy()
-        chat_ctx.append(role="user", text=txt)
-        stream = agent.llm.chat(chat_ctx=chat_ctx)
-        await agent.say(stream)
+        # Process text input through the session
+        await session.process_text_input(txt)
 
     @chat.on("message_received")
     def on_chat_received(msg: rtc.ChatMessage):
@@ -110,7 +124,8 @@ async def entrypoint(ctx: JobContext):
 
     log_queue = asyncio.Queue()
 
-    @agent.on("user_speech_committed")
+    # Handle user speech events
+    @session.on("user_speech_committed")
     def on_user_speech_committed(msg: llm.ChatMessage):
         # convert string lists to strings, drop images
         if isinstance(msg.content, list):
@@ -120,7 +135,8 @@ async def entrypoint(ctx: JobContext):
         print(msg.content)
         log_queue.put_nowait(f"[{datetime.now()}] USER:\n{msg.content}\n\n")
 
-    @agent.on("agent_speech_committed")
+    # Handle agent speech events
+    @session.on("agent_speech_committed")
     def on_agent_speech_committed(msg: llm.ChatMessage):
         print(msg.content)
         log_queue.put_nowait(f"[{datetime.now()}] AGENT:\n{msg.content}\n\n")
@@ -141,11 +157,9 @@ async def entrypoint(ctx: JobContext):
 
     ctx.add_shutdown_callback(finish_queue)
     log_queue.put_nowait(f"[{datetime.now()}] SYSTEM: Agent started and ready for conversation\n\n")
-    await agent.say("Hey, nice to talk to you!", allow_interruptions=True)
-
-
-
-
+    
+    # Send initial greeting
+    await session.generate_reply(instructions="say hello to the user and introduce yourself as Kristine")
 
 
 if __name__ == "__main__":

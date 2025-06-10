@@ -2,7 +2,7 @@ aiohttp
 numpy
 python-dotenv
 tqdm
-livekit==0.15.1
+livekit
 livekit-agents
 livekit-plugins-openai
 livekit-plugins-deepgram
