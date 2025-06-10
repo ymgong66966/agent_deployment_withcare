@@ -35,7 +35,7 @@ _chat_ctx_lock = asyncio.Lock()
 
 
 async def get_caregiver_profile():
-    """Fetch the latest caregiver profile from Snowflake database"""
+    """Fetch a random caregiver profile from Snowflake database"""
     try:
         # Check if all required environment variables are set
         required_vars = ['SNOWFLAKE_USER', 'SNOWFLAKE_PASSWORD', 'SNOWFLAKE_ACCOUNT', 
@@ -62,11 +62,11 @@ async def get_caregiver_profile():
         cursor.execute(f"USE DATABASE {database}")
         cursor.execute(f"USE SCHEMA {schema}")
         
-        # Get the latest profile
+        # Get a random caregiver profile
         cursor.execute("""
         SELECT profile_string 
         FROM CAREGIVER_PROFILES 
-        ORDER BY created_at DESC 
+        ORDER BY RANDOM() 
         LIMIT 1
         """)
         
