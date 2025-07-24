@@ -69,3 +69,5 @@ what's your address?
 [2025-03-10 18:29:10.617448] AGENT:
 Hey, how can I help you today?
 
+[2025-07-24 00:37:00.096893] SYSTEM: Agent started and ready for conversation
+

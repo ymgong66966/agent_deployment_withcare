@@ -1,6 +1,7 @@
 import logging
 import pickle
 import asyncio
+import uuid
 
 import numpy as np
 from typing import Annotated
@@ -20,12 +21,13 @@ from livekit.agents import (
     RoomInputOptions,
     AutoSubscribe
 )
-from livekit.plugins import deepgram, openai, silero
+from livekit.plugins import deepgram, openai, silero, noise_cancellation
 import aiofiles
 load_dotenv()
 
 logger = logging.getLogger("rag-assistant")
 logger.setLevel(logging.INFO)
+
 # EMBEDDINGS_DIMENSION = 1536
 # INDEX_PATH = "vdb_data"
 # DATA_PATH = "my_data.pkl"
@@ -83,6 +85,62 @@ async def get_caregiver_profile():
         return ""
 
 
+async def save_chat_to_snowflake(chat_id: str, chat_turn: str, profile_id: int = None, chat_time: datetime = None, chat_type: str = None):
+    """Save a chat message to Snowflake database"""
+    try:
+        # Check if all required environment variables are set
+        required_vars = ['SNOWFLAKE_USER', 'SNOWFLAKE_PASSWORD', 'SNOWFLAKE_ACCOUNT', 
+                         'SNOWFLAKE_DATABASE', 'SNOWFLAKE_SCHEMA']
+        
+        for var in required_vars:
+            if not os.getenv(var):
+                logger.warning(f"Missing required environment variable: {var}")
+                return False
+        
+        # Use asyncio.to_thread to run the synchronous Snowflake operations in a thread
+        def sync_save():
+            # Connect to Snowflake
+            ctx = snowflake.connector.connect(
+                user=os.getenv('SNOWFLAKE_USER'),
+                password=os.getenv('SNOWFLAKE_PASSWORD'),
+                account=os.getenv('SNOWFLAKE_ACCOUNT')
+            )
+            cursor = ctx.cursor()
+            
+            try:
+                # Set the database and schema
+                database = os.getenv('SNOWFLAKE_DATABASE')
+                schema = os.getenv('SNOWFLAKE_SCHEMA')
+                
+                # Use the specified database and schema
+                cursor.execute(f"USE DATABASE {database}")
+                cursor.execute(f"USE SCHEMA {schema}")
+                
+                # Insert the chat message
+                cursor.execute("""
+                INSERT INTO CAREGIVER_CHAT (chat_id, chat_turn, profile_id, chat_time, chat_type)
+                VALUES (%s, %s, %s, %s, %s)
+                """, (chat_id, chat_turn, profile_id, chat_time or datetime.now(), chat_type))
+                
+                logger.debug(f"Successfully inserted message: {chat_turn[:50]}...")
+                return True
+                
+            finally:
+                # Always close the connection
+                cursor.close()
+                ctx.close()
+        
+        # Run the synchronous operation in a thread pool
+        result = await asyncio.to_thread(sync_save)
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error saving chat to Snowflake: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+
+
 class CaregiverAgent(Agent):
     """Custom agent class for caregiver persona"""
     def __init__(self, profile_text: str):
@@ -92,6 +150,10 @@ class CaregiverAgent(Agent):
 
 
 async def entrypoint(ctx: JobContext):
+    # Generate unique chat session ID
+    chat_session_id = str(uuid.uuid4())
+    logger.info(f"Starting new chat session: {chat_session_id}")
+    
     # Fetch caregiver profile from Snowflake
     caregiver_profile = await get_caregiver_profile()
     
@@ -103,7 +165,9 @@ async def entrypoint(ctx: JobContext):
 
     # Create an agent session with the necessary components
     session = AgentSession(
-        vad=silero.VAD.load(),
+        vad=silero.VAD.load(activation_threshold=0.7,  # Higher threshold = less sensitive (default: 0.5)
+            min_silence_duration=0.8,  # Longer silence needed to stop (default: 0.55)
+            min_speech_duration=0.1, ),
         stt=deepgram.STT(),
         llm=openai.LLM(),
         tts=openai.TTS(),
@@ -117,57 +181,120 @@ async def entrypoint(ctx: JobContext):
     await session.start(
         room=ctx.room,
         agent=agent,
-        room_input_options=RoomInputOptions(),
+        room_input_options=RoomInputOptions(noise_cancellation=noise_cancellation.BVC()),
     )
     
     log_queue = asyncio.Queue()
 
-    # Handle user speech events
-    @session.on("user_speech_committed")
-    def on_user_speech_committed(msg: llm.ChatMessage):
-        # convert string lists to strings, drop images
-        if isinstance(msg.content, list):
-            msg.content = "\n".join(
-                "[image]" if isinstance(x, llm.ChatImage) else x for x in msg
-            )
-        print(msg.content)
-        log_queue.put_nowait(f"[{datetime.now()}] USER:\n{msg.content}\n\n")
+    # Handle user input transcription events
+    # @session.on("user_input_transcribed")
+    # def on_user_input_transcribed(event):
+    #     print(f"USER TRANSCRIBED: {event.transcript} (final: {event.is_final})")
+    #     logger.debug(f"User input transcribed: {event.transcript[:50]}... (final: {event.is_final})")
+        # Only log final transcripts to avoid duplicates
+        # if event.is_final and len(event.transcript.strip()) > 2:
+        #     log_queue.put_nowait({
+        #         "type": "USER_FINAL",
+        #         "content": event.transcript,
+        #         "timestamp": datetime.now()
+        #     })
 
-    # Handle agent speech events
-    @session.on("agent_speech_committed")
-    def on_agent_speech_committed(msg: llm.ChatMessage):
-        print(msg.content)
-        log_queue.put_nowait(f"[{datetime.now()}] AGENT:\n{msg.content}\n\n")
+    # Handle conversation items (both user and agent messages)
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(event):
+        item = event.item
+        print(f"CONVERSATION ITEM: {item.role.upper()} - {item.text_content}")
+        logger.debug(f"Conversation item added from {item.role}: {item.text_content[:50]}...")
+        
+        if len(item.text_content.strip()) > 3:
+            log_queue.put_nowait({
+                "type": f"{item.role.upper()}_CONVERSATION",
+                "content": item.text_content,
+                "timestamp": datetime.now()
+            })
+
+    # Handle agent speech creation
+    # @session.on("speech_created")
+    # def on_speech_created(event):
+    #     print(f"AGENT SPEECH CREATED: source={event.source}, user_initiated={event.user_initiated}")
+    #     logger.debug(f"Agent speech created: source={event.source}, user_initiated={event.user_initiated}")
+        
+        # We can track when speech is created, but the actual content will come through conversation_item_added
+        # log_queue.put_nowait({
+        #     "type": "AGENT_SPEECH_CREATED",
+        #     "content": f"Speech created - source: {event.source}, user_initiated: {event.user_initiated}",
+        #     "timestamp": datetime.now()
+        # })
     
-    # Handle text input events (new in Agents 1.0)
-    @session.on("text_input_received")
-    def on_text_input_received(text: str):
-        print(f"Text input received: {text}")
-        log_queue.put_nowait(f"[{datetime.now()}] TEXT INPUT:\n{text}\n\n")
+    # Handle text input events (this should still work)
+    # @session.on("text_input_received")
+    # def on_text_input_received(text: str):
+    #     print(f"TEXT INPUT: {text}")
+    #     logger.debug(f"Text input received: {text[:50]}...")
+    #     log_queue.put_nowait({
+    #         "type": "TEXT_INPUT",
+    #         "content": text,
+    #         "timestamp": datetime.now(),
+    #     })
 
-    # # Handle transcription events (new in Agents 1.0)
-    # @session.on("transcription_received")
-    # def on_transcription_received(text: str, is_final: bool):
-    #     if is_final:
-    #         print(f"Transcription: {text}")
-    #         log_queue.put_nowait(f"[{datetime.now()}] TRANSCRIPTION:\n{text}\n\n")
+    # Add a general event listener to see what events are being fired
+    def log_all_events(event_name, *args, **kwargs):
+        logger.debug(f"Event fired: {event_name} with args: {args[:2]}...")  # Limit args to avoid spam
+    
+    # Try to catch common events that might exist
+    # event_names = [
+    #     "user_input_transcribed", "conversation_item_added", "speech_created",
+    #     "function_tools_executed", "metrics_collected", "agent_state_changed", "user_state_changed"
+    # ]
+    
+    # for event_name in event_names:
+    #     try:
+    #         session.on(event_name, lambda *args, name=event_name, **kwargs: log_all_events(name, *args, **kwargs))
+    #     except Exception as e:
+    #         logger.debug(f"Could not register handler for {event_name}: {e}")
 
-    async def write_transcription():
-        async with aiofiles.open("text.txt", "a") as f:
-            while True:
-                msg = await log_queue.get()
-                if msg is None:
+    async def save_chat_messages():
+        """Process messages from queue and save to Snowflake"""
+        while True:
+            try:
+                msg_data = await log_queue.get()
+                if msg_data is None:
                     break
-                await f.write(msg)
-                # await f.flush() 
-    write_task = asyncio.create_task(write_transcription())
+                
+                # Format message for database
+                formatted_message = msg_data['content']
+                
+                # Save to Snowflake (profile_id can be extracted from profile_text if needed)
+                success = await save_chat_to_snowflake(
+                    chat_id=chat_session_id,
+                    chat_turn=formatted_message,
+                    profile_id=1,
+                    chat_time=msg_data['timestamp'],
+                    chat_type=msg_data['type']
+                )
+                
+                if success:
+                    logger.info(f"Saved message to Snowflake: {msg_data['type']}")
+                else:
+                    logger.error(f"Failed to save message to Snowflake: {msg_data['type']}")
+                    
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+                
+    save_task = asyncio.create_task(save_chat_messages())
 
     async def finish_queue():
         log_queue.put_nowait(None)
-        await write_task
+        await save_task
 
     ctx.add_shutdown_callback(finish_queue)
-    log_queue.put_nowait(f"[{datetime.now()}] SYSTEM: Agent started and ready for conversation\n\n")
+    
+    # # Log session start
+    # log_queue.put_nowait({
+    #     "type": "SYSTEM",
+    #     "content": f"Agent started and ready for conversation. Session ID: {chat_session_id}",
+    #     "timestamp": datetime.now()
+    # })
     
     # Send initial greeting
     await session.generate_reply(instructions="say hello to the user and introduce yourself")
