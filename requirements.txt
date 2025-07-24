@@ -4,6 +4,7 @@ python-dotenv
 tqdm
 livekit
 livekit-agents
+livekit-plugins-noise-cancellation
 livekit-plugins-openai
 livekit-plugins-deepgram
 livekit-plugins-silero
