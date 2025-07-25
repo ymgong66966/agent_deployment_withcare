@@ -108,6 +108,7 @@ snowflake_pool = SnowflakeConnectionPool(max_connections=3)
 
 async def get_caregiver_profile():
     """Fetch a random caregiver profile from Snowflake database"""
+    conn = None
     try:
         # Check if all required environment variables are set
         required_vars = ['SNOWFLAKE_USER', 'SNOWFLAKE_PASSWORD', 'SNOWFLAKE_ACCOUNT', 
@@ -116,10 +117,12 @@ async def get_caregiver_profile():
         for var in required_vars:
             if not os.getenv(var):
                 logger.warning(f"Missing required environment variable: {var}")
-                return ""
+                return "", -1
                 
         # Get a connection from the pool
         conn = await snowflake_pool.get_connection()
+        if not conn:
+            return "", -1
         
         # Get a random caregiver profile
         cursor = conn.cursor()
@@ -134,13 +137,15 @@ async def get_caregiver_profile():
         profile_string = result[0] if result else ""
         profile_id = result[1] if result else -1
         
-        # Return the connection to the pool
-        await snowflake_pool.return_connection(conn)
-        
         return profile_string, profile_id
+        
     except Exception as e:
         logger.error(f"Error fetching caregiver profile from Snowflake: {e}")
         return "", -1
+    finally:
+        # Always return the connection to the pool
+        if conn:
+            await snowflake_pool.return_connection(conn)
 
 
 async def save_chat_to_snowflake(chat_id: str, chat_turn: str, profile_id: int = None, chat_time: datetime = None, chat_type: str = None):
@@ -320,7 +325,9 @@ async def entrypoint(ctx: JobContext):
         await save_task
         # Close all Snowflake connections
         await snowflake_pool.close_all()
-    
+
+    ctx.add_shutdown_callback(finish_queue)
+
     # # Log session start
     # log_queue.put_nowait({
     #     "type": "SYSTEM",
