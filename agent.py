@@ -22,7 +22,7 @@ from livekit.agents import (
     AutoSubscribe
 )
 from livekit.plugins import deepgram, openai, silero, noise_cancellation
-# from livekit.plugins.turn_detector.english import EnglishModel
+from livekit.plugins.turn_detector.english import EnglishModel
 import aiofiles
 load_dotenv()
 
@@ -208,15 +208,17 @@ async def entrypoint(ctx: JobContext):
 
     # Create an agent session with the necessary components
     session = AgentSession(
-        # turn_detection=EnglishModel(),
+        turn_detection=EnglishModel(),  # Use contextually-aware turn detection
         stt=deepgram.STT(model="nova-3", language="en"),
-        vad=silero.VAD.load(activation_threshold=0.8,  # Higher threshold = less sensitive (default: 0.5)
-            min_silence_duration=0.8,  # Longer silence needed to stop (default: 0.55)
-            min_speech_duration=0.3, ),
+        vad=silero.VAD.load(
+            activation_threshold=0.5,  # Reset to default (0.5)
+            min_silence_duration=0.55,  # Reset to default (0.55)
+            min_speech_duration=0.05,  # Reset to default (0.05)
+        ),
         llm=openai.LLM(),
         tts=openai.TTS(),
         allow_interruptions=True,
-        min_interruption_duration=0.7,
+        min_interruption_duration=1.0,  # Slightly longer interruption threshold
     )
     
     # Create the agent with the caregiver profile
