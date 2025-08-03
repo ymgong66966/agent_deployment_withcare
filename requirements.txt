@@ -3,7 +3,7 @@ numpy
 python-dotenv
 tqdm
 livekit
-livekit-agents[turn-detector]~=1.0
+# livekit-agents[turn-detector]~=1.0
 livekit-plugins-noise-cancellation
 livekit-plugins-openai
 livekit-plugins-deepgram
@@ -17,3 +17,4 @@ langgraph-checkpoint==2.0.16
 langchain==0.3.14
 snowflake-connector-python
 aiofiles
+livekit-plugins-turn-detector
